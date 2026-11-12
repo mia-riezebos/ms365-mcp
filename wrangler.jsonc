@@ -10,7 +10,7 @@
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "ed4977662761496eb967394335017cdb" }],
   "vars": {
     "PUBLIC_BASE_URL": "https://ms.mia.cx",
-    "MS365_TENANT_ID": "common"
+    "MS365_TENANT_ID": "5f291a8a-5d66-40e2-8940-1f76a4348c2b"
   }
   // MS365_TENANT_ID: "common" (any work/school or personal account), "organizations", or one tenant id.
   // Optional vars: ALLOWED_TENANTS, ALLOWED_USERS, ALLOWED_REDIRECT_HOSTS (comma-separated).

@@ -15,20 +15,21 @@ const STYLE = `:root{color-scheme:light dark;--bg:#f4f5f7;--card:#fff;--fg:#1b1d
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;padding:1.5rem}
 main{width:100%;max-width:30rem;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:2rem;box-shadow:0 8px 30px rgba(0,0,0,.06)}
 .brand{display:flex;align-items:center;gap:.6rem;color:var(--muted);font-size:.85rem;font-weight:600;letter-spacing:.02em;margin-bottom:1.25rem}
-.logo{display:grid;grid-template-columns:repeat(2,9px);gap:2px}.logo i{width:9px;height:9px}.logo i:nth-child(1){background:#f25022}.logo i:nth-child(2){background:#7fba00}.logo i:nth-child(3){background:#00a4ef}.logo i:nth-child(4){background:#ffb900}
+.mark{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;background:var(--fg);color:var(--card);font:700 11px ui-monospace,Menlo,monospace}.brand b{color:var(--fg);font-weight:700}.brand small{display:block;font-weight:400;letter-spacing:0}
 h1{font-size:1.35rem;line-height:1.3;margin:0 0 .75rem}p{margin:.6rem 0;color:var(--muted)}strong{color:var(--fg)}
 code{font:.85em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:.05em .35em}
 ul{padding-left:1.2rem;color:var(--muted)}li{margin:.25rem 0}
 .facts{border:1px solid var(--line);border-radius:10px;padding:.25rem 1rem;margin:1rem 0}.facts div{display:flex;justify-content:space-between;gap:1rem;padding:.55rem 0;border-bottom:1px solid var(--line);font-size:.9rem}.facts div:last-child{border:0}.facts span{color:var(--muted)}
 .warn{background:rgba(255,185,0,.12);border:1px solid rgba(255,185,0,.45);border-radius:10px;padding:.6rem .85rem;color:var(--fg)}
 .actions{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;font:inherit;font-weight:600;padding:.7rem 1rem;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
-button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}button:hover{filter:brightness(1.08)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button.ms{display:flex;align-items:center;justify-content:center;gap:.6rem;background:#fff;color:#5e5e5e;border-color:#8c8c8c;border-radius:4px}button.ms svg{flex:none}button:hover{filter:brightness(1.08)}
 .foot{margin-top:1.5rem;font-size:.8rem}a{color:var(--accent)}`;
 const html = (body, init = {}) => {
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'text/html; charset=utf-8');
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>${STYLE}</style><main><div class="brand"><span class="logo"><i></i><i></i><i></i><i></i></span>Microsoft 365 MCP</div>${body}</main></html>`, { ...init, headers });
+<style>${STYLE}</style><main><div class="brand"><span class="mark">mcp</span><div><b>ms365-mcp</b><small>Open-source MCP server for Microsoft 365, not run by Microsoft</small></div></div>${body}</main></html>`, { ...init, headers });
 };
 const errorPage = (title, detail, status = 400) =>
   html(`<title>${escape(title)}</title><h1>${escape(title)}</h1><p>${escape(detail)}</p><p class="foot">Go back to your agent and connect again. If it keeps failing, share this message with whoever runs this server.</p>`, { status });
@@ -76,18 +77,20 @@ const mcpHandler = {
   },
 };
 
-function consentPage(details, handle) {
+const MS_LOGO = '<svg width="20" height="20" viewBox="0 0 21 21" aria-hidden="true"><path fill="#f25022" d="M1 1h9v9H1z"/><path fill="#7fba00" d="M11 1h9v9h-9z"/><path fill="#00a4ef" d="M1 11h9v9H1z"/><path fill="#ffb900" d="M11 11h9v9h-9z"/></svg>';
+
+function consentPage(details, handle, host) {
   const app = escape(details.clientName || 'An app');
-  return html(`<title>Connect ${app}</title>
-<h1>Connect ${app} to your Microsoft 365 account?</h1>
-<p>Allow takes you to Microsoft to sign in. At first ${app} only learns who you are. Whenever it needs more, like reading mail or a calendar, Microsoft asks you again and lists exactly what it wants.</p>
+  return html(`<title>Connect ${app} to ms365-mcp</title>
+<h1>Let ${app} use your Microsoft 365 account through ${escape(host)}?</h1>
+<p>This server (<strong>${escape(host)}</strong>) passes ${app}'s requests to Microsoft 365 as you. Signing in with Microsoft first only tells it who you are. When ${app} needs more, like reading mail or a calendar, Microsoft asks you again and lists exactly what it wants.</p>
 <div class="facts"><div><span>App</span><strong>${app}</strong></div>
 <div><span>Publisher</span><strong>${details.clientDomain ? escape(details.clientDomain) : 'Not verified'}</strong></div>
 <div><span>Access goes to</span><strong>${escape(details.redirectHost)}</strong></div></div>
 ${details.redirectIsLoopback ? '<p class="warn">This sends access to an app on your computer. Continue only if you just started connecting from it.</p>' : ''}
 <form method="post"><input type="hidden" name="handle" value="${escape(handle)}">
-<div class="actions"><button name="decision" value="deny">Deny</button><button class="primary" name="decision" value="approve">Allow</button></div></form>
-<p class="foot">Open source: <a href="https://github.com/mia-riezebos/ms365-mcp">github.com/mia-riezebos/ms365-mcp</a></p>`);
+<div class="actions"><button name="decision" value="deny">Cancel</button><button class="ms" name="decision" value="approve">${MS_LOGO}Sign in with Microsoft</button></div></form>
+<p class="foot">Source: <a href="https://github.com/mia-riezebos/ms365-mcp">github.com/mia-riezebos/ms365-mcp</a></p>`);
 }
 
 async function authorize(request, env) {
@@ -97,7 +100,7 @@ async function authorize(request, env) {
     if (!redirectAllowed(env, authRequest.redirectUri)) return text(`Redirect to ${new URL(authRequest.redirectUri).origin} is not allowed.`);
     const details = await oauth.describeConsent(authRequest);
     const consent = await oauth.beginConsent(authRequest);
-    return withHeaders(consentPage(details, consent.handle), consent.headers);
+    return withHeaders(consentPage(details, consent.handle, new URL(request.url).host), consent.headers);
   }
   if (request.method !== 'POST') return text('Method not allowed', 405);
   const form = await request.formData();
@@ -125,7 +128,9 @@ async function callback(request, env) {
   const { request: original, data, headers } = await oauth.finishUpstream(request);
   if (params.get('error')) {
     console.warn('sign-in returned error', params.get('error'), params.get('error_description'));
-    headers.set('Location', authorizationErrorRedirect(original, 'access_denied', params.get('error_description')?.split('\r\n')[0]));
+    const description = params.get('error_description')?.split('\r\n')[0];
+    if (params.get('error') !== 'access_denied') return withHeaders(errorPage('Microsoft sign-in failed', description || params.get('error'), 502), headers);
+    headers.set('Location', authorizationErrorRedirect(original, 'access_denied', description));
     return new Response(null, { status: 302, headers });
   }
   const tokens = await redeemCode(env, request, params.get('code'), data.verifier, BASE_SCOPES);
