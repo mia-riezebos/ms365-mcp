@@ -5,7 +5,7 @@ import { graphClient } from './graph.mjs';
 import { BASE_SCOPES, union } from './scopes.mjs';
 import {
   accessToken, accountOf, addScopes, authorizeUrl, createConnection, createScopeRequest, deleteScopeRequest,
-  loadConnection, loadScopeRequest, pkcePair, redeemCode, saveScopeRequest,
+  loadConnection, loadScopeRequest, pkceChallenge, pkcePair, redeemCode,
 } from './entra.mjs';
 
 const DAY = 24 * 60 * 60;
@@ -158,9 +158,7 @@ async function scopeStart(request, env, id) {
   const req = await loadScopeRequest(env, id);
   const conn = req && (await loadConnection(env, req.connId));
   if (!conn) return html('<title>Link expired</title><h1>This link has expired</h1><p>Ask your agent to request the access again.</p>', { status: 404 });
-  const { verifier, challenge } = await pkcePair();
-  await saveScopeRequest(env, id, { ...req, verifier });
-  return Response.redirect(authorizeUrl(env, request, { state: `${SCOPE_STATE}${id}`, codeChallenge: challenge, scopes: union(conn.scopes, req.scopes), loginHint: conn.upn }), 302);
+  return Response.redirect(authorizeUrl(env, request, { state: `${SCOPE_STATE}${id}`, codeChallenge: await pkceChallenge(req.verifier), scopes: union(conn.scopes, req.scopes), loginHint: conn.upn }), 302);
 }
 
 async function scopeCallback(request, env, params) {
