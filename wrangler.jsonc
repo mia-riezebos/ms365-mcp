@@ -5,9 +5,9 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_KV_ID" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "ed4977662761496eb967394335017cdb" }],
   "vars": {
-    "PUBLIC_BASE_URL": "https://ms365-mcp.REPLACE_WITH_SUBDOMAIN.workers.dev",
+    "PUBLIC_BASE_URL": "https://ms365-mcp.mia-cx.workers.dev",
     "MS365_TENANT_ID": "common"
   }
   // MS365_TENANT_ID: "common" (any work/school or personal account), "organizations", or one tenant id.
