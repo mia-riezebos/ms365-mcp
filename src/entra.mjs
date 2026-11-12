@@ -12,10 +12,11 @@ const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).re
 const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 export const randomId = () => b64url(crypto.getRandomValues(new Uint8Array(24)));
 
+export const pkceChallenge = async (verifier) => b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+
 export async function pkcePair() {
   const verifier = randomId();
-  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
-  return { verifier, challenge };
+  return { verifier, challenge: await pkceChallenge(verifier) };
 }
 
 // Microsoft sign-in URL asking for scopes (plus OpenID Connect and offline_access).
@@ -161,17 +162,16 @@ export async function accessToken(env, connId, resource = GRAPH_ORIGIN) {
 }
 
 // Scope requests: a one-time link that sends the user to Microsoft for more scopes on one connection.
+// The PKCE verifier is fixed when the link is made, so opening the link again (a link preview, an
+// in-app browser handing off to Safari) sends the same challenge instead of invalidating the first.
 const requestKey = (id) => `scope-request:${id}`;
 export async function createScopeRequest(env, connId, scopes, reason) {
   const id = randomId();
-  await env.OAUTH_KV.put(requestKey(id), JSON.stringify({ connId, scopes, reason }), { expirationTtl: 60 * 60 });
+  await env.OAUTH_KV.put(requestKey(id), JSON.stringify({ connId, scopes, reason, verifier: randomId() }), { expirationTtl: 60 * 60 });
   return id;
 }
 export async function loadScopeRequest(env, id) {
   const raw = await env.OAUTH_KV.get(requestKey(id));
   return raw ? JSON.parse(raw) : null;
-}
-export async function saveScopeRequest(env, id, request) {
-  await env.OAUTH_KV.put(requestKey(id), JSON.stringify(request), { expirationTtl: 60 * 60 });
 }
 export const deleteScopeRequest = (env, id) => env.OAUTH_KV.delete(requestKey(id));
