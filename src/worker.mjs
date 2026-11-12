@@ -23,7 +23,7 @@ ul{padding-left:1.2rem;color:var(--muted)}li{margin:.25rem 0}
 .warn{background:rgba(255,185,0,.12);border:1px solid rgba(255,185,0,.45);border-radius:10px;padding:.6rem .85rem;color:var(--fg)}
 .actions{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;font:inherit;font-weight:600;padding:.7rem 1rem;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
-button.ms{display:flex;align-items:center;justify-content:center;gap:.6rem;background:#fff;color:#5e5e5e;border-color:#8c8c8c;border-radius:4px}button.ms svg{flex:none}button:hover{filter:brightness(1.08)}
+button.ms{flex:1.6;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:.6rem;background:#fff;color:#5e5e5e;border-color:#8c8c8c;border-radius:4px}button.ms svg{flex:none}button:hover{filter:brightness(1.08)}
 .foot{margin-top:1.5rem;font-size:.8rem}a{color:var(--accent)}`;
 const html = (body, init = {}) => {
   const headers = new Headers(init.headers);
