@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": false,
   "routes": [{ "pattern": "ms.mia.cx", "custom_domain": true }],
+  "observability": { "enabled": true },
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "ed4977662761496eb967394335017cdb" }],
   "vars": {
     "PUBLIC_BASE_URL": "https://ms.mia.cx",
