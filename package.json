@@ -1,0 +1,23 @@
+{
+  "name": "ms365-mcp",
+  "version": "0.3.0",
+  "description": "Remote MCP server for Microsoft 365 with delegated Entra OAuth and need-to-know scopes, on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  },
+  "repository": "github:mia-riezebos/ms365-mcp"
+}
