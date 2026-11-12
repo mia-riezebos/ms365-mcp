@@ -170,6 +170,7 @@ const defaultHandler = {
       if (error instanceof CimdFetchError) return text('This app could not be verified.');
       throw error;
     }
+    if (pathname === '/logout') return text('Signed out', 200);
     if (pathname === '/healthz') return text('ok', 200);
     if (pathname === '/')
       return html(`<title>Microsoft 365 MCP</title><h1>Microsoft 365 MCP</h1>

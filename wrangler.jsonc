@@ -4,10 +4,11 @@
   "main": "src/worker.mjs",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  "workers_dev": true,
+  "workers_dev": false,
+  "routes": [{ "pattern": "ms.mia.cx", "custom_domain": true }],
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "ed4977662761496eb967394335017cdb" }],
   "vars": {
-    "PUBLIC_BASE_URL": "https://ms365-mcp.mia-cx.workers.dev",
+    "PUBLIC_BASE_URL": "https://ms.mia.cx",
     "MS365_TENANT_ID": "common"
   }
   // MS365_TENANT_ID: "common" (any work/school or personal account), "organizations", or one tenant id.
