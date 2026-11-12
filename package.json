@@ -1,0 +1,22 @@
+{
+  "name": "ms365-mcp",
+  "version": "1.0.0",
+  "description": "Remote MCP server for Microsoft 365 (mail incl. shared mailboxes, calendar, contacts, Teams, Planner, To Do, files, OneNote) with delegated Entra OAuth, on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  }
+}
