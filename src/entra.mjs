@@ -1,31 +1,36 @@
-// Delegated Microsoft Entra sign-in and Graph token storage. Graph tokens are kept per Entra user (oid)
-// in KV, encrypted with TOKEN_ENC_KEY, and refreshed (with the rotated refresh token stored) on demand.
+// Delegated Microsoft Entra sign-in and per-connection token storage.
+// Each MCP connection has its own record in KV (encrypted with TOKEN_ENC_KEY): the Entra account, the scopes
+// granted to that connection, and its refresh token. Access tokens are requested per API with exactly the
+// connection's scopes for that API, and the rotated refresh token is stored on every refresh.
+import { BASE_SCOPES, GRAPH_ORIGIN, OIDC_SCOPES, entraScope, isGraphScope, normalizeScope, resourceOf, union } from './scopes.mjs';
 
-const authority = (env) => `https://login.microsoftonline.com/${env.MS365_TENANT_ID}/oauth2/v2.0`;
-const scopes = (env) => env.GRAPH_SCOPES || 'https://graph.microsoft.com/.default offline_access openid profile';
+const authority = (env) => `https://login.microsoftonline.com/${env.MS365_TENANT_ID || 'organizations'}/oauth2/v2.0`;
 export const redirectUri = (req) => new URL('/auth/callback', req.url).toString();
+const scopeParam = (scopes) => union(OIDC_SCOPES, scopes).map(entraScope).join(' ');
 
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+export const randomId = () => b64url(crypto.getRandomValues(new Uint8Array(24)));
 
 export async function pkcePair() {
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const verifier = randomId();
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   return { verifier, challenge };
 }
 
-export function authorizeUrl(env, req, { state, codeChallenge }) {
+// Microsoft sign-in URL asking for scopes (plus OpenID Connect and offline_access).
+export function authorizeUrl(env, req, { state, codeChallenge, scopes, loginHint }) {
   const url = new URL(`${authority(env)}/authorize`);
   url.search = new URLSearchParams({
     client_id: env.MS365_APP_CLIENT_ID,
     response_type: 'code',
     response_mode: 'query',
     redirect_uri: redirectUri(req),
-    scope: scopes(env),
+    scope: scopeParam(scopes),
     state,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
-    prompt: 'select_account',
+    ...(loginHint ? { login_hint: loginHint } : { prompt: 'select_account' }),
   }).toString();
   return url.toString();
 }
@@ -37,26 +42,38 @@ export class EntraError extends Error {
   }
 }
 
-async function tokenRequest(env, params) {
+async function tokenRequest(env, scopes, params) {
   const res = await fetch(`${authority(env)}/token`, {
     method: 'POST',
-    body: new URLSearchParams({ client_id: env.MS365_APP_CLIENT_ID, client_secret: env.MS365_APP_CLIENT_SECRET, scope: scopes(env), ...params }),
+    body: new URLSearchParams({ client_id: env.MS365_APP_CLIENT_ID, client_secret: env.MS365_APP_CLIENT_SECRET, scope: scopeParam(scopes), ...params }),
   });
   const body = await res.json();
   if (!res.ok) throw new EntraError(body);
   return body;
 }
 
-export const redeemCode = (env, req, code, codeVerifier) =>
-  tokenRequest(env, { grant_type: 'authorization_code', code, redirect_uri: redirectUri(req), code_verifier: codeVerifier });
+const graphScopesOf = (scopes) => {
+  const graph = scopes.filter(isGraphScope);
+  return graph.length ? graph : BASE_SCOPES;
+};
 
-export function idTokenClaims(idToken) {
-  return JSON.parse(new TextDecoder().decode(fromB64url(idToken.split('.')[1])));
+// Redeems a sign-in code for Graph tokens covering the Graph scopes in scopes.
+export const redeemCode = (env, req, code, codeVerifier, scopes) =>
+  tokenRequest(env, graphScopesOf(scopes), { grant_type: 'authorization_code', code, redirect_uri: redirectUri(req), code_verifier: codeVerifier });
+
+export function accountOf(tokens) {
+  const claims = JSON.parse(new TextDecoder().decode(fromB64url(tokens.id_token.split('.')[1])));
+  return { userId: claims.oid, tenantId: claims.tid, upn: (claims.preferred_username || claims.upn || '').toLowerCase(), name: claims.name };
 }
 
+// Scopes Microsoft actually granted, of the ones asked for.
+const grantedOf = (tokens, asked) => {
+  const got = new Set((tokens.scope || '').split(' ').map(normalizeScope).filter(Boolean).map((s) => s.toLowerCase()));
+  return asked.filter((s) => got.has(s.toLowerCase()));
+};
+
 let keyPromise;
-const encKey = (env) =>
-  (keyPromise ??= crypto.subtle.importKey('raw', fromB64url(env.TOKEN_ENC_KEY), 'AES-GCM', false, ['encrypt', 'decrypt']));
+const encKey = (env) => (keyPromise ??= crypto.subtle.importKey('raw', fromB64url(env.TOKEN_ENC_KEY), 'AES-GCM', false, ['encrypt', 'decrypt']));
 
 async function seal(env, value) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -69,61 +86,92 @@ async function unseal(env, sealed) {
   return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await encKey(env), data)));
 }
 
-const userKey = (userId) => `graph-user:${userId}`;
+const connKey = (connId) => `conn:${connId}`;
 
-async function saveUser(env, userId, user) {
-  await env.OAUTH_KV.put(userKey(userId), JSON.stringify({ upn: user.upn, signedInAt: user.signedInAt, refreshedAt: user.refreshedAt, sealed: await seal(env, user) }));
+async function saveConnection(env, connId, conn) {
+  await env.OAUTH_KV.put(connKey(connId), JSON.stringify({ upn: conn.upn, scopes: conn.scopes, updatedAt: new Date().toISOString(), sealed: await seal(env, conn) }));
 }
 
-async function loadUser(env, userId) {
-  const raw = await env.OAUTH_KV.get(userKey(userId));
+export async function loadConnection(env, connId) {
+  const raw = await env.OAUTH_KV.get(connKey(connId));
   return raw ? unseal(env, JSON.parse(raw).sealed) : null;
 }
 
-// Stores the account's Graph tokens only after allow(account) passes, so refused accounts leave nothing behind.
-export async function storeUserTokens(env, tokens, allow) {
-  const claims = idTokenClaims(tokens.id_token);
-  const account = { userId: claims.oid, upn: (claims.preferred_username || claims.upn || '').toLowerCase(), tenantId: claims.tid };
-  const refusal = allow(account);
-  if (refusal) return { refusal };
-  const user = {
-    upn: (claims.preferred_username || claims.upn || '').toLowerCase(),
-    name: claims.name,
-    tenantId: claims.tid,
-    refreshToken: tokens.refresh_token,
-    accessToken: tokens.access_token,
-    accessExpiresAt: Date.now() + (tokens.expires_in - 120) * 1000,
-    signedInAt: new Date().toISOString(),
-  };
-  await saveUser(env, claims.oid, user);
-  return account;
+const cached = (tokens) => ({ token: tokens.access_token, expiresAt: Date.now() + (tokens.expires_in - 120) * 1000 });
+
+// Creates a connection from a first sign-in: identity only, with BASE_SCOPES.
+export async function createConnection(env, account, tokens) {
+  const connId = randomId();
+  const scopes = union(BASE_SCOPES, grantedOf(tokens, BASE_SCOPES));
+  await saveConnection(env, connId, { ...account, scopes, refreshToken: tokens.refresh_token, access: { [GRAPH_ORIGIN]: cached(tokens) }, createdAt: new Date().toISOString() });
+  return connId;
+}
+
+// Adds the scopes from a request_scopes sign-in. Graph scopes count as granted if the Graph token has them;
+// each other API is checked by getting a token for it. Returns { granted, refused }.
+export async function addScopes(env, connId, conn, tokens, requested) {
+  conn.refreshToken = tokens.refresh_token || conn.refreshToken;
+  const graphAsked = requested.filter(isGraphScope);
+  const granted = grantedOf(tokens, graphAsked);
+  conn.access = { [GRAPH_ORIGIN]: cached(tokens) };
+  for (const resource of new Set(requested.filter((s) => !isGraphScope(s)).map(resourceOf))) {
+    const asked = requested.filter((s) => !isGraphScope(s) && resourceOf(s) === resource);
+    try {
+      const t = await tokenRequest(env, asked, { grant_type: 'refresh_token', refresh_token: conn.refreshToken });
+      if (t.refresh_token) conn.refreshToken = t.refresh_token;
+      conn.access[resource] = cached(t);
+      granted.push(...grantedOf(t, asked));
+    } catch {}
+  }
+  conn.scopes = union(conn.scopes, granted);
+  await saveConnection(env, connId, conn);
+  const have = new Set(conn.scopes.map((s) => s.toLowerCase()));
+  return { granted: conn.scopes, refused: requested.filter((s) => !have.has(s.toLowerCase())) };
 }
 
 const refreshing = new Map();
 
-// A valid Graph access token for the user, refreshing it when it has expired.
-export async function graphAccessToken(env, userId) {
-  const user = await loadUser(env, userId);
-  if (!user) throw new Error('No Microsoft account is linked to this connection; reconnect the MCP server.');
-  if (user.accessToken && user.accessExpiresAt > Date.now()) return user.accessToken;
-  if (!refreshing.has(userId)) {
+// A valid access token for one API (Graph by default), covering this connection's scopes for it.
+export async function accessToken(env, connId, resource = GRAPH_ORIGIN) {
+  const conn = await loadConnection(env, connId);
+  if (!conn) throw new Error('This connection has no Microsoft account; reconnect the MCP server.');
+  const hit = conn.access?.[resource];
+  if (hit && hit.expiresAt > Date.now()) return hit.token;
+  const scopes = resource === GRAPH_ORIGIN ? graphScopesOf(conn.scopes) : conn.scopes.filter((s) => !isGraphScope(s) && resourceOf(s) === resource);
+  if (!scopes.length) throw new Error(`This connection has no scopes for ${resource}; call request_scopes first.`);
+  const key = `${connId} ${resource}`;
+  if (!refreshing.has(key)) {
     refreshing.set(
-      userId,
-      tokenRequest(env, { grant_type: 'refresh_token', refresh_token: user.refreshToken })
+      key,
+      tokenRequest(env, scopes, { grant_type: 'refresh_token', refresh_token: conn.refreshToken })
         .then(async (tokens) => {
-          user.accessToken = tokens.access_token;
-          user.accessExpiresAt = Date.now() + (tokens.expires_in - 120) * 1000;
-          if (tokens.refresh_token) user.refreshToken = tokens.refresh_token;
-          user.refreshedAt = new Date().toISOString();
-          await saveUser(env, userId, user);
-          return user.accessToken;
+          conn.access = { ...conn.access, [resource]: cached(tokens) };
+          if (tokens.refresh_token) conn.refreshToken = tokens.refresh_token;
+          await saveConnection(env, connId, conn);
+          return tokens.access_token;
         })
         .catch((err) => {
           if (err.code === 'invalid_grant') throw new Error('Microsoft sign-in has expired or was revoked; reconnect the MCP server.');
           throw err;
         })
-        .finally(() => refreshing.delete(userId)),
+        .finally(() => refreshing.delete(key)),
     );
   }
-  return refreshing.get(userId);
+  return refreshing.get(key);
 }
+
+// Scope requests: a one-time link that sends the user to Microsoft for more scopes on one connection.
+const requestKey = (id) => `scope-request:${id}`;
+export async function createScopeRequest(env, connId, scopes, reason) {
+  const id = randomId();
+  await env.OAUTH_KV.put(requestKey(id), JSON.stringify({ connId, scopes, reason }), { expirationTtl: 60 * 60 });
+  return id;
+}
+export async function loadScopeRequest(env, id) {
+  const raw = await env.OAUTH_KV.get(requestKey(id));
+  return raw ? JSON.parse(raw) : null;
+}
+export async function saveScopeRequest(env, id, request) {
+  await env.OAUTH_KV.put(requestKey(id), JSON.stringify(request), { expirationTtl: 60 * 60 });
+}
+export const deleteScopeRequest = (env, id) => env.OAUTH_KV.delete(requestKey(id));
